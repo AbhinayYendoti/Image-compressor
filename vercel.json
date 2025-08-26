@@ -1,11 +1,5 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -48,10 +42,5 @@
       "destination": "/test/",
       "permanent": true
     }
-  ],
-  "functions": {
-    "src/app/api/**/*.ts": {
-      "maxDuration": 30
-    }
-  }
+  ]
 }
