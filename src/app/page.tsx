@@ -266,8 +266,11 @@ export default function HomePage() {
                         <span className="text-gray-600">Space Saved:</span>
                         <span className="font-medium text-green-600">
                           {formatFileSize(
-                            files.reduce((sum, f) => sum + f.size, 0) - 
-                            compressedFiles.reduce((sum, f) => sum + (f.compressed?.size || 0), 0)
+                            Math.max(
+                              0,
+                              files.reduce((sum, f) => sum + f.size, 0) - 
+                              compressedFiles.reduce((sum, f) => sum + (f.compressed?.size || 0), 0)
+                            )
                           )}
                         </span>
                       </div>

@@ -117,8 +117,10 @@ export default function ImageUploader({
                           <span className="text-green-600">
                             {formatFileSize(file.compressed.size)}
                           </span>
-                          <span className="text-green-600">
-                            ({file.compressed.compressionRatio.toFixed(1)}% smaller)
+                          <span className={file.compressed.compressionRatio > 0 ? "text-green-600" : "text-gray-500"}>
+                            {file.compressed.compressionRatio > 0
+                              ? `(${file.compressed.compressionRatio.toFixed(1)}% smaller)`
+                              : '(kept original size)'}
                           </span>
                         </>
                       )}
