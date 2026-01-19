@@ -78,6 +78,19 @@ export function calculateCompressionRatio(originalSize: number, compressedSize: 
   return ((originalSize - compressedSize) / originalSize) * 100;
 }
 
+function pickTargetFormat(file: File, settings: CompressionSettings): { mime: string; format: 'jpeg' | 'png' | 'webp' } {
+  // Default to requested format, but avoid transparency loss
+  const hasTransparencyRisk = file.type === 'image/png' || file.type === 'image/webp' || file.type === 'image/svg+xml';
+
+  // If user asked for jpeg but source likely has transparency, prefer webp
+  if (settings.format === 'jpeg' && hasTransparencyRisk) {
+    return { mime: 'image/webp', format: 'webp' };
+  }
+
+  // Map requested format to mime
+  return { mime: `image/${settings.format}`, format: settings.format };
+}
+
 export async function compressImage(
   file: File,
   settings: CompressionSettings
@@ -122,8 +135,10 @@ export async function compressImage(
         // Draw image with new dimensions
         ctx.drawImage(img, 0, 0, width, height);
 
+        // Determine target format
+        const target = pickTargetFormat(file, settings);
+
         // Convert to blob
-        const mimeType = `image/${settings.format}`;
         canvas.toBlob(
           (blob) => {
             if (!blob) {
@@ -131,19 +146,26 @@ export async function compressImage(
               return;
             }
 
-            const compressionRatio = calculateCompressionRatio(file.size, blob.size);
+            // If compression failed to reduce size (and not explicitly lossless), keep original
+            const shouldKeepOriginal = !settings.lossless && blob.size >= file.size;
+            const finalBlob = shouldKeepOriginal ? file : blob;
+            const finalSize = finalBlob.size;
+            const finalFormat = shouldKeepOriginal ? (file.type.replace('image/', '') as 'jpeg' | 'png' | 'webp') : target.format;
+            const finalQuality = shouldKeepOriginal ? 100 : settings.quality;
+
+            const compressionRatio = calculateCompressionRatio(file.size, finalSize);
             
             resolve({
-              blob,
-              size: blob.size,
-              quality: settings.quality,
-              format: settings.format,
+              blob: finalBlob,
+              size: finalSize,
+              quality: finalQuality,
+              format: finalFormat,
               width,
               height,
               compressionRatio
             });
           },
-          mimeType,
+          target.mime,
           settings.quality / 100
         );
       } catch (error) {
