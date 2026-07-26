@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { ThemeProvider } from '@/context/ThemeContext';
+import ThemeScript from '@/components/ThemeScript';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -42,21 +44,25 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className="h-full" suppressHydrationWarning>
       <head>
+        <ThemeScript />
         <meta name="theme-color" content="#0ea5e9" />
+        <meta name="color-scheme" content="light dark" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="Image Compressor" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
-      <body className={`${inter.className} h-full bg-gray-50 antialiased`}>
-        <ErrorBoundary>
-          <div id="root" className="h-full">
-            {children}
-          </div>
-        </ErrorBoundary>
+      <body className={`${inter.className} h-full antialiased`}>
+        <ThemeProvider>
+          <ErrorBoundary>
+            <div id="root" className="h-full">
+              {children}
+            </div>
+          </ErrorBoundary>
+        </ThemeProvider>
       </body>
     </html>
   );

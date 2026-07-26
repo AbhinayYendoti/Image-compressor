@@ -17,10 +17,10 @@ export default function ImagePreview({
   if (files.length === 0) {
     return (
       <div className="card text-center py-12">
-        <div className="flex items-center justify-center w-16 h-16 bg-gray-100 rounded-full mx-auto mb-4">
+        <div className="flex items-center justify-center w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full mx-auto mb-4">
           <ImageIcon className="w-8 h-8 text-gray-400" />
         </div>
-        <h3 className="text-lg font-medium text-gray-900 mb-2">
+        <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
           No images uploaded yet
         </h3>
         <p className="text-gray-500">
@@ -33,7 +33,7 @@ export default function ImagePreview({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-gray-900">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
           Image Previews ({files.length})
         </h3>
       </div>
@@ -47,13 +47,13 @@ export default function ImagePreview({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               className={`card overflow-hidden ${
-                file.error ? 'border-red-200 bg-red-50' : ''
+                file.error ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30' : ''
               }`}
             >
               {/* File Header */}
               <div className="flex items-center justify-between mb-3">
                 <div className="flex-1 min-w-0">
-                  <h4 className="font-medium text-gray-900 truncate">
+                  <h4 className="font-medium text-gray-900 dark:text-gray-100 truncate">
                     {file.name}
                   </h4>
                   <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -86,7 +86,7 @@ export default function ImagePreview({
                   )}
                   <button
                     onClick={() => onRemoveFile(file.id)}
-                    className="p-1 hover:bg-gray-200 rounded transition-colors"
+                    className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded transition-colors"
                     aria-label="Remove file"
                   >
                     <X className="w-4 h-4 text-gray-500" />
@@ -108,10 +108,10 @@ export default function ImagePreview({
                 <div className="space-y-4">
                   {/* Original Image */}
                   <div>
-                    <h5 className="text-sm font-medium text-gray-700 mb-2">
+                    <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Original
                     </h5>
-                    <div className="relative aspect-video bg-gray-100 rounded-lg overflow-hidden">
+                    <div className="relative aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden">
                       {file.preview ? (
                         <img
                           src={file.preview}
@@ -136,10 +136,10 @@ export default function ImagePreview({
                   {/* Compressed Image */}
                   {file.compressed && (
                     <div>
-                      <h5 className="text-sm font-medium text-gray-700 mb-2">
+                      <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Compressed ({file.compressed.format.toUpperCase()})
                       </h5>
-                      <div className="relative aspect-video bg-gray-100 rounded-lg overflow-hidden">
+                      <div className="relative aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden">
                         <img
                           src={URL.createObjectURL(file.compressed.blob)}
                           alt={`Compressed ${file.name}`}
@@ -161,7 +161,7 @@ export default function ImagePreview({
                   {file.isProcessing && (
                     <div className="text-center py-4">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-2"></div>
-                      <p className="text-sm text-gray-600">Compressing...</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Compressing...</p>
                     </div>
                   )}
 
@@ -189,21 +189,21 @@ export default function ImagePreview({
           animate={{ opacity: 1, y: 0 }}
           className="card"
         >
-          <h4 className="font-semibold text-gray-900 mb-3">Compression Summary</h4>
+          <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">Compression Summary</h4>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <p className="text-gray-500">Total Files</p>
-              <p className="font-medium text-gray-900">{files.length}</p>
+              <p className="text-gray-500 dark:text-gray-400">Total Files</p>
+              <p className="font-medium text-gray-900 dark:text-gray-100">{files.length}</p>
             </div>
             <div>
-              <p className="text-gray-500">Original Size</p>
-              <p className="font-medium text-gray-900">
+              <p className="text-gray-500 dark:text-gray-400">Original Size</p>
+              <p className="font-medium text-gray-900 dark:text-gray-100">
                 {formatFileSize(files.reduce((sum, f) => sum + f.size, 0))}
               </p>
             </div>
             <div>
-              <p className="text-gray-500">Compressed Size</p>
-              <p className="font-medium text-gray-900">
+              <p className="text-gray-500 dark:text-gray-400">Compressed Size</p>
+              <p className="font-medium text-gray-900 dark:text-gray-100">
                 {formatFileSize(
                   files
                     .filter(f => f.compressed)
@@ -212,7 +212,7 @@ export default function ImagePreview({
               </p>
             </div>
             <div>
-              <p className="text-gray-500">Space Saved</p>
+              <p className="text-gray-500 dark:text-gray-400">Space Saved</p>
               <p className="font-medium text-green-600">
                 {formatFileSize(
                   files.reduce((sum, f) => sum + f.size, 0) -
