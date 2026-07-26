@@ -136,7 +136,7 @@ export default function HomePage() {
   const canDownload = compressedFiles.length > 0;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <Header />
       
       <main className="flex-1 container mx-auto px-4 py-8 max-w-6xl">
@@ -146,10 +146,10 @@ export default function HomePage() {
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-8"
         >
-          <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+          <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-4">
             Secure Image Compressor
           </h1>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+          <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
             Compress your images online with our secure, fast, and privacy-focused tool. 
             No uploads to our servers - everything happens in your browser.
           </p>
@@ -242,14 +242,14 @@ export default function HomePage() {
                 animate={{ opacity: 1 }}
                 className="card"
               >
-                <h3 className="font-semibold text-gray-900 mb-3">Statistics</h3>
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">Statistics</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Total Files:</span>
+                    <span className="text-gray-600 dark:text-gray-400">Total Files:</span>
                     <span className="font-medium">{files.length}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Original Size:</span>
+                    <span className="text-gray-600 dark:text-gray-400">Original Size:</span>
                     <span className="font-medium">
                       {formatFileSize(files.reduce((sum, f) => sum + f.size, 0))}
                     </span>
@@ -257,13 +257,13 @@ export default function HomePage() {
                   {compressedFiles.length > 0 && (
                     <>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Compressed Size:</span>
+                        <span className="text-gray-600 dark:text-gray-400">Compressed Size:</span>
                         <span className="font-medium">
                           {formatFileSize(compressedFiles.reduce((sum, f) => sum + (f.compressed?.size || 0), 0))}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Space Saved:</span>
+                        <span className="text-gray-600 dark:text-gray-400">Space Saved:</span>
                         <span className="font-medium text-green-600">
                           {formatFileSize(
                             Math.max(

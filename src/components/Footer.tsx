@@ -3,17 +3,17 @@ import { Github, Heart, Shield, Zap } from 'lucide-react';
 
 export default function Footer() {
   return (
-    <footer className="bg-white border-t border-gray-200 mt-auto">
+    <footer className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 mt-auto">
       <div className="container mx-auto px-4 py-8">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           {/* Brand */}
           <div className="md:col-span-2">
-            <h3 className="text-lg font-semibold text-gray-900 mb-3">Image Compressor</h3>
-            <p className="text-gray-600 mb-4 max-w-md">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">Image Compressor</h3>
+            <p className="text-gray-600 dark:text-gray-400 mb-4 max-w-md">
               A secure, fast, and privacy-focused online image compression tool. 
               Your images never leave your device - everything happens in your browser.
             </p>
-            <div className="flex items-center gap-4 text-sm text-gray-500">
+            <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
               <div className="flex items-center gap-1">
                 <Shield className="w-4 h-4 text-green-500" />
                 <span>Privacy First</span>
@@ -27,25 +27,25 @@ export default function Footer() {
 
           {/* Quick Links */}
           <div>
-            <h4 className="font-semibold text-gray-900 mb-3">Quick Links</h4>
+            <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">Quick Links</h4>
             <ul className="space-y-2 text-sm">
               <li>
-                <a href="#" className="text-gray-600 hover:text-primary-600 transition-colors">
+                <a href="#" className="text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
                   How it Works
                 </a>
               </li>
               <li>
-                <a href="#" className="text-gray-600 hover:text-primary-600 transition-colors">
+                <a href="#" className="text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
                   Supported Formats
                 </a>
               </li>
               <li>
-                <a href="#" className="text-gray-600 hover:text-primary-600 transition-colors">
+                <a href="#" className="text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
                   Compression Tips
                 </a>
               </li>
               <li>
-                <a href="#" className="text-gray-600 hover:text-primary-600 transition-colors">
+                <a href="#" className="text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
                   FAQ
                 </a>
               </li>
@@ -54,20 +54,20 @@ export default function Footer() {
 
           {/* Legal */}
           <div>
-            <h4 className="font-semibold text-gray-900 mb-3">Legal</h4>
+            <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">Legal</h4>
             <ul className="space-y-2 text-sm">
               <li>
-                <a href="/privacy" className="text-gray-600 hover:text-primary-600 transition-colors">
+                <a href="/privacy" className="text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
                   Privacy Policy
                 </a>
               </li>
               <li>
-                <a href="/terms" className="text-gray-600 hover:text-primary-600 transition-colors">
+                <a href="/terms" className="text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
                   Terms of Service
                 </a>
               </li>
               <li>
-                <a href="/test" className="text-gray-600 hover:text-primary-600 transition-colors">
+                <a href="/test" className="text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
                   Test Page
                 </a>
               </li>
@@ -76,8 +76,8 @@ export default function Footer() {
         </div>
 
         {/* Bottom Bar */}
-        <div className="border-t border-gray-200 mt-8 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p className="text-sm text-gray-500">
+        <div className="border-t border-gray-200 dark:border-gray-800 mt-8 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             © 2024 Image Compressor. Made with{' '}
             <Heart className="inline w-4 h-4 text-red-500" /> for the web.
           </p>
@@ -85,12 +85,12 @@ export default function Footer() {
           <div className="flex items-center gap-4">
             <a
               href="#"
-              className="text-gray-500 hover:text-gray-700 transition-colors"
+              className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
               aria-label="GitHub"
             >
               <Github className="w-5 h-5" />
             </a>
-            <button className="text-sm text-gray-500 hover:text-primary-600 transition-colors">
+            <button className="text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
               Report Issue
             </button>
           </div>
