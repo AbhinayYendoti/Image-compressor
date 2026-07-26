@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ThemeScript from '@/components/ThemeScript';
+import ThemeColorMeta from '@/components/ThemeColorMeta';
 import { ThemeProvider } from '@/components/ThemeProvider';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -56,6 +57,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} h-full bg-gray-50 dark:bg-gray-900 antialiased`}>
         <ThemeProvider>
+          <ThemeColorMeta />
           <ErrorBoundary>
             <div id="root" className="h-full">
               {children}

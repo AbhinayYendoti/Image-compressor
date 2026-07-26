@@ -32,17 +32,17 @@ export default function ImageUploader({
       >
         <input {...getInputProps()} />
         <div className="flex flex-col items-center gap-4">
-          <div className="flex items-center justify-center w-16 h-16 bg-primary-100 rounded-full">
-            <Upload className="w-8 h-8 text-primary-600" />
+          <div className="flex items-center justify-center w-16 h-16 bg-primary-100 dark:bg-primary-900/40 rounded-full">
+            <Upload className="w-8 h-8 text-primary-600 dark:text-primary-400" />
           </div>
           <div className="text-center">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
               {isDragActive ? 'Drop images here' : 'Upload Images'}
             </h3>
-            <p className="text-gray-600 mb-4">
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
               Drag & drop your images here, or click to browse
             </p>
-            <div className="text-sm text-gray-500 space-y-1">
+            <div className="text-sm text-gray-500 dark:text-gray-400 space-y-1">
               <p>Supported formats: JPG, PNG, GIF, WebP, SVG</p>
               <p>Maximum file size: 50MB per file</p>
             </div>
@@ -59,7 +59,7 @@ export default function ImageUploader({
             exit={{ opacity: 0, height: 0 }}
             className="space-y-3"
           >
-            <h3 className="font-semibold text-gray-900">
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">
               Uploaded Files ({files.length})
             </h3>
             
@@ -72,10 +72,10 @@ export default function ImageUploader({
                   exit={{ opacity: 0, x: 20 }}
                   className={`flex items-center gap-3 p-3 rounded-lg border ${
                     file.error 
-                      ? 'bg-red-50 border-red-200' 
+                      ? 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800' 
                       : file.compressed 
-                        ? 'bg-green-50 border-green-200'
-                        : 'bg-gray-50 border-gray-200'
+                        ? 'bg-green-50 dark:bg-green-950/40 border-green-200 dark:border-green-800'
+                        : 'bg-gray-50 dark:bg-gray-800/60 border-gray-200 dark:border-gray-700'
                   }`}
                 >
                   {/* File Icon */}
@@ -87,8 +87,8 @@ export default function ImageUploader({
                         className="w-10 h-10 rounded object-cover"
                       />
                     ) : (
-                      <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center">
-                        <ImageIcon className="w-5 h-5 text-gray-500" />
+                      <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center">
+                        <ImageIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                       </div>
                     )}
                   </div>
@@ -96,7 +96,7 @@ export default function ImageUploader({
                   {/* File Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-gray-900 truncate">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                         {file.name}
                       </p>
                       {file.error && (
@@ -109,15 +109,15 @@ export default function ImageUploader({
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600 flex-shrink-0"></div>
                       )}
                     </div>
-                    <div className="flex items-center gap-4 text-xs text-gray-500">
+                    <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
                       <span>{formatFileSize(file.size)}</span>
                       {file.compressed && (
                         <>
                           <span>→</span>
-                          <span className="text-green-600">
+                          <span className="text-green-600 dark:text-green-400">
                             {formatFileSize(file.compressed.size)}
                           </span>
-                          <span className={file.compressed.compressionRatio > 0 ? "text-green-600" : "text-gray-500"}>
+                          <span className={file.compressed.compressionRatio > 0 ? "text-green-600 dark:text-green-400" : "text-gray-500 dark:text-gray-400"}>
                             {file.compressed.compressionRatio > 0
                               ? `(${file.compressed.compressionRatio.toFixed(1)}% smaller)`
                               : '(kept original size)'}
@@ -133,7 +133,7 @@ export default function ImageUploader({
                   {/* Remove Button */}
                   <button
                     onClick={() => onRemoveFile(file.id)}
-                    className="flex-shrink-0 p-1 hover:bg-gray-200 rounded transition-colors"
+                    className="flex-shrink-0 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
                     aria-label="Remove file"
                   >
                     <X className="w-4 h-4 text-gray-500" />
@@ -144,7 +144,7 @@ export default function ImageUploader({
 
             {/* Summary */}
             {files.length > 0 && (
-              <div className="text-sm text-gray-600">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
                 <p>
                   {validFiles.length} valid file{validFiles.length !== 1 ? 's' : ''}
                   {errorFiles.length > 0 && (

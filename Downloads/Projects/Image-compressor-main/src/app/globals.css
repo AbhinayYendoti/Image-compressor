@@ -64,6 +64,18 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+
+  input[type='range'] {
+    @apply bg-gray-200 dark:bg-gray-600;
+  }
+
+  input[type='range']::-webkit-slider-thumb {
+    @apply appearance-none h-4 w-4 rounded-full bg-primary-600 cursor-pointer;
+  }
+
+  input[type='range']::-moz-range-thumb {
+    @apply h-4 w-4 rounded-full bg-primary-600 border-0 cursor-pointer;
+  }
 }
 
 /* Custom scrollbar for webkit browsers */

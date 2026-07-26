@@ -36,17 +36,19 @@ export default function TestPage() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-4">Test Page</h1>
-      <button 
-        onClick={runTests}
-        className="btn-primary mb-4"
-      >
-        Run Tests
-      </button>
-      <pre className="bg-gray-100 p-4 rounded-lg whitespace-pre-wrap">
-        {testResult || 'Click "Run Tests" to start...'}
-      </pre>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="container mx-auto px-4 py-8">
+        <h1 className="text-2xl font-bold mb-4 text-gray-900 dark:text-gray-100">Test Page</h1>
+        <button 
+          onClick={runTests}
+          className="btn-primary mb-4"
+        >
+          Run Tests
+        </button>
+        <pre className="bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 p-4 rounded-lg whitespace-pre-wrap">
+          {testResult || 'Click "Run Tests" to start...'}
+        </pre>
+      </div>
     </div>
   );
 }
