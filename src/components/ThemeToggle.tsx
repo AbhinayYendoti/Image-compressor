@@ -12,7 +12,7 @@ export default function ThemeToggle() {
     <button
       type="button"
       onClick={toggleTheme}
-      className="relative p-2 rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 transition-colors"
+      className="relative p-2 rounded-full text-primary-700/70 hover:bg-white/70 hover:text-primary-800 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white transition-colors"
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
     >
       <span className="relative block w-5 h-5">
