@@ -36,6 +36,73 @@ export type ReviewItem = {
   reviewed_by: string | null;
   reviewed_at: string | null;
   reason: string | null;
+  /** The redacted SuperDocs `approve_changes` receipt. Null until SuperDocs accepts it. */
+  superdocs_approval: SuperDocsApproval | null;
+  /** Set when a SuperDocs approval failed; the item stays PENDING. */
+  error: string | null;
+};
+
+export type SuperDocsApproval = {
+  document_id: string;
+  approved_change_ids: string[];
+  status?: string;
+  request_id?: string;
+  mode?: string;
+};
+
+export type SuperDocsOperation = {
+  id: string;
+  operation: "upload_document" | "send_edit_instruction" | "approve_changes" | "export_document";
+  mode: string;
+  status: "SUCCEEDED" | "FAILED";
+  document_id: string | null;
+  change_ids: string[];
+  request_id: string | null;
+  detail: string;
+  error: string | null;
+  started_at: string;
+  completed_at: string;
+  duration_ms: number;
+};
+
+export type SuperDocsExport = {
+  kind: "SUPERDOCS_EXPORT";
+  mode: string;
+  document_id: string;
+  export_id: string | null;
+  format: string | null;
+  filename: string;
+  approved_change_ids: string[];
+  download_url: string | null;
+  storage_key: string | null;
+  size: number | null;
+  sha256: string | null;
+  retrieved_at: string;
+  note?: string;
+};
+
+export type SuperDocsLedger = {
+  mode: string;
+  working_document_id: string | null;
+  source_document_ids: string[];
+  export: SuperDocsExport | null;
+  coverage: {
+    complete: boolean;
+    operations: Array<{ operation: string; exercised: boolean; count: number; failures: number }>;
+  };
+  operations: SuperDocsOperation[];
+};
+
+export type GeneratedArtifact = {
+  id: string;
+  name: string;
+  kind: string;
+  content_type: string;
+  storage_key: string;
+  size: number;
+  sha256: string;
+  generated_at: string;
+  description: string;
 };
 
 export type SignoffItem = {
@@ -86,6 +153,9 @@ export type CloseDetail = {
   generating: boolean;
   exported: boolean;
   superdocs_document_ids: string[];
+  superdocs_working_document_id: string | null;
+  superdocs_export: SuperDocsExport | null;
+  generated_artifacts: GeneratedArtifact[];
   documents: DocumentItem[];
   checklist: ChecklistItem[];
   reviews: ReviewItem[];
@@ -110,7 +180,8 @@ export type GenerationJob = {
 
 export type ExportStatus = {
   exported: boolean;
-  export: { filename: string; size: number; generated_at: string; files: string[] } | null;
+  export: { kind: string; filename: string; size: number; generated_at: string; files: string[] } | null;
+  superdocs_export: SuperDocsExport | null;
   planned_files: string[];
 };
 

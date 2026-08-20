@@ -11,10 +11,12 @@ Three defects from the audit are addressed structurally here:
 """
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from fastapi import HTTPException, status as http_status
 
+from ..core.config import settings
 from .clock import now_iso
 from .templates import DEFAULT_TEMPLATE_ID, get_template
 
@@ -64,9 +66,18 @@ def build_close(
         "closed_at": None,
         "closed_by": None,
         "generating": False,
+        "generating_since": None,
         "exported": False,
         "export": None,
         "superdocs_document_ids": [],
+        # The document `edit_document` was issued against, and the one that
+        # `approve_changes` / `export_document` are addressed to.
+        "superdocs_working_document_id": None,
+        "superdocs_export": None,
+        # Append-only ledger of every SuperDocs adapter call made for this close.
+        "superdocs_operations": [],
+        # Artifacts the app generates rather than receives, e.g. the Supporting Memo.
+        "generated_artifacts": [],
         "documents": [],
         # A fresh close owns nothing yet: no documents, no reviews, and every
         # sign-off unsigned. Reviews are created by generation, not seeded.
@@ -150,12 +161,67 @@ def ensure_mutable(close: dict[str, Any]) -> None:
         )
 
 
+def generation_is_stale(close: dict[str, Any]) -> bool:
+    """True when `generating` was left set by a worker that died mid-run.
+
+    Only `run_generation` ever cleared the flag, so a restart (or a crash) during
+    generation stranded the close: every later attempt got 409 GENERATION_IN_PROGRESS
+    and the derived status stayed GENERATING forever, with no way back. The flag is
+    now only believed for as long as a real run could plausibly still be going.
+    """
+    if not close.get("generating"):
+        return False
+
+    started = close.get("generating_since")
+    if not started:
+        # Set by a build that did not record a start time; nothing can be waiting on it.
+        return True
+    try:
+        began = datetime.fromisoformat(started)
+    except (TypeError, ValueError):
+        return True
+    if began.tzinfo is None:
+        began = began.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - began).total_seconds()
+    return age > settings.generation_timeout_seconds
+
+
 def ensure_not_generating(close: dict[str, Any]) -> None:
-    if close.get("generating"):
+    if close.get("generating") and not generation_is_stale(close):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail={"error": "GENERATION_IN_PROGRESS", "message": "A pack generation is already running."},
         )
+
+
+def clear_generation(close: dict[str, Any]) -> None:
+    close["generating"] = False
+    close["generating_since"] = None
+
+
+def invalidate_export(close: dict[str, Any], actor: Any = None) -> None:
+    """Drop an exported pack that no longer matches the close it certifies.
+
+    `exported` used to be sticky. Uploading a document, deciding a review or signing
+    off after an export left it set, so the close gate stayed satisfied by a zip that
+    was missing the later evidence and the period could be closed against it. Any
+    mutation that changes what the pack would contain now retires the old one, which
+    also puts the "Export pack" button back in front of the user.
+    """
+    if not close.get("exported") and not close.get("export") and not close.get("superdocs_export"):
+        return
+    stale = close.get("export") or {}
+    close["exported"] = False
+    close["export"] = None
+    # The SuperDocs export was produced from the approval set as it stood; a change to
+    # that set makes it stale too, and the next export re-runs `export_document`.
+    close["superdocs_export"] = None
+    audit(
+        close,
+        "EXPORT_INVALIDATED",
+        actor,
+        f"{stale.get('filename', 'the exported pack')} no longer matches this close; export again",
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -166,7 +232,7 @@ def ensure_not_generating(close: dict[str, Any]) -> None:
 def derive_status(close: dict[str, Any], readiness: dict[str, Any]) -> str:
     if close.get("closed_at"):
         return "CLOSED"
-    if close.get("generating"):
+    if close.get("generating") and not generation_is_stale(close):
         return "GENERATING"
     if any(item["status"] == "PENDING" for item in close["reviews"]):
         return "REVIEW_REQUIRED"

@@ -14,8 +14,11 @@ from pydantic import BaseModel, Field
 
 from ..core.security import Principal, get_current_user, issue_session
 from ..db import store
+from ..integrations.superdocs.client import APPROVE, EXPORT, current_mode, get_client
 from ..services import export as export_service
-from ..services import generation, storage
+from ..services import generation, storage, superdocs_ops
+from ..services.memo import find_artifact, upsert_supporting_memo
+from ..services.clock import now_iso
 from ..services.closes import (
     audit,
     build_close,
@@ -25,6 +28,8 @@ from ..services.closes import (
     find_document,
     find_review,
     find_signoff,
+    generation_is_stale,
+    invalidate_export,
     new_id,
     serialize,
 )
@@ -241,6 +246,7 @@ async def upload_document(
         )["created_at"]
         if suggested:
             audit(current, "DOCUMENT_AUTO_CLASSIFIED", user, f"{filename} -> {suggested}")
+        invalidate_export(current, user)
 
     close = apply_to_close(close_id, mutator)
     return find_document(close, document_id)
@@ -266,6 +272,7 @@ def map_document(
             )
         document.update({"document_type": document_type, "status": "READY"})
         audit(current, "DOCUMENT_CLASSIFIED", user, f"{document['filename']} -> {document_type}")
+        invalidate_export(current, user)
 
     return find_document(apply_to_close(close_id, mutator), document_id)
 
@@ -291,6 +298,53 @@ def document_content(
 # --------------------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------------------
+# SuperDocs integration surface
+# --------------------------------------------------------------------------------------
+
+
+@router.get("/closes/{close_id}/superdocs")
+def superdocs_ledger(close_id: str, user: Principal = Depends(get_current_user)) -> dict[str, Any]:
+    """The SuperDocs operation ledger for this close.
+
+    Exposed so a reviewer can confirm the contract is genuinely exercised rather than
+    described. Contains no credentials: the API key is never recorded, and every stored
+    response envelope is redacted before it gets here.
+    """
+    close = load_close(close_id)
+    return {
+        "mode": current_mode(),
+        "working_document_id": close.get("superdocs_working_document_id"),
+        "source_document_ids": close.get("superdocs_document_ids") or [],
+        "export": close.get("superdocs_export"),
+        "coverage": superdocs_ops.contract_coverage(close),
+        "operations": close.get("superdocs_operations") or [],
+    }
+
+
+@router.get("/closes/{close_id}/artifacts")
+def artifacts(close_id: str, user: Principal = Depends(get_current_user)) -> list[dict[str, Any]]:
+    return load_close(close_id).get("generated_artifacts") or []
+
+
+@router.get("/closes/{close_id}/artifacts/{artifact_id}/content")
+def artifact_content(
+    close_id: str, artifact_id: str, user: Principal = Depends(get_current_user)
+) -> Response:
+    artifact = find_artifact(load_close(close_id), artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found in this close")
+    try:
+        content = storage.get_bytes(artifact["storage_key"])
+    except FileNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Generated artifact is missing") from None
+    return Response(
+        content=content,
+        media_type=artifact.get("content_type") or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{artifact["name"]}"'},
+    )
+
+
 @router.get("/closes/{close_id}/checklist")
 def checklist(close_id: str, user: Principal = Depends(get_current_user)) -> list[dict[str, Any]]:
     return present(load_close(close_id))["checklist"]
@@ -314,6 +368,7 @@ def update_checklist(
         else:
             item.update({"status": "PENDING", "completed_by": None, "completed_at": None})
             audit(current, "CHECKLIST_REOPENED", user, item["title"])
+        invalidate_export(current, user)
 
     close = apply_to_close(close_id, mutator)
     return next(item for item in present(close)["checklist"] if item["id"] == item_id)
@@ -345,11 +400,30 @@ def generate(
             },
         )
 
+    # A run abandoned by a crashed worker leaves its job row RUNNING forever, which the
+    # UI would poll indefinitely. Retire it before superseding it.
+    abandoned = store.active_job_for_close(close_id) if generation_is_stale(close) else None
+    if abandoned:
+        abandoned.update(
+            {
+                "status": "FAILED",
+                "error": "Generation was interrupted before it finished and has been superseded.",
+                "completed_at": now_iso(),
+            }
+        )
+        store.save_job(abandoned)
+
     job = generation.new_job(close_id, user.name)
     store.save_job(job)
 
     def mutator(current: dict[str, Any]) -> None:
+        # Re-checked inside the write transaction so two concurrent requests cannot
+        # both get past the guard above and run generation twice.
+        ensure_not_generating(current)
+        if current.get("generating"):
+            audit(current, "GENERATION_ABANDONED", user, "previous run did not finish; starting a new one")
         current["generating"] = True
+        current["generating_since"] = job["started_at"]
         audit(current, "GENERATION_STARTED", user, f"job {job['id']}")
 
     apply_to_close(close_id, mutator)
@@ -375,21 +449,117 @@ def reviews(close_id: str, user: Principal = Depends(get_current_user)) -> list[
     return load_close(close_id)["reviews"]
 
 
-def _decide(close_id: str, review_id: str, decision: str, user: Principal, reason: str | None) -> dict[str, Any]:
+def _decide(
+    close_id: str,
+    review_id: str,
+    decision: str,
+    user: Principal,
+    reason: str | None,
+    approval: dict[str, Any] | None = None,
+    ledger_entry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     def mutator(current: dict[str, Any]) -> None:
         ensure_mutable(current)
         review = find_review(current, review_id)
-        review.update({"status": decision, "reviewed_by": user.name, "reviewed_at": None, "reason": reason})
+        review.update(
+            {
+                "status": decision,
+                "reviewed_by": user.name,
+                "reviewed_at": None,
+                "reason": reason,
+                "superdocs_approval": approval,
+                "error": None,
+            }
+        )
         review["reviewed_at"] = audit(
             current, f"REVIEW_{decision}", user, f"{review['section']}" + (f": {reason}" if reason else "")
         )["created_at"]
+        if ledger_entry is not None:
+            superdocs_ops.record(current, ledger_entry)
+        invalidate_export(current, user)
 
     return find_review(apply_to_close(close_id, mutator), review_id)
 
 
 @router.post("/closes/{close_id}/reviews/{review_id}/approve")
-def approve_review(close_id: str, review_id: str, user: Principal = Depends(get_current_user)) -> dict[str, Any]:
-    return _decide(close_id, review_id, "APPROVED", user, None)
+async def approve_review(
+    close_id: str, review_id: str, user: Principal = Depends(get_current_user)
+) -> dict[str, Any]:
+    """Approving a proposed change sends it to SuperDocs before it counts as approved.
+
+    A local approval that SuperDocs never received would be a lie in the audit trail and
+    in the exported pack, so the SuperDocs call happens first and a failure leaves the
+    item PENDING with the error attached rather than quietly marking it APPROVED.
+    """
+    close = load_close(close_id)
+    ensure_mutable(close)
+    review = find_review(close, review_id)
+
+    working_document_id = close.get("superdocs_working_document_id")
+    if not working_document_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "NOT_GENERATED",
+                "message": "Generate the close pack before approving proposed changes.",
+            },
+        )
+
+    change_id = review.get("external_change_id") or review["id"]
+    client = get_client()
+    try:
+        envelope, entry = await superdocs_ops.call(
+            close_id,
+            APPROVE,
+            lambda: client.approve_changes(working_document_id, [change_id]),
+            document_id=working_document_id,
+            change_ids=[change_id],
+            detail=review["section"],
+            # Recorded inside the same transaction that flips the review to APPROVED,
+            # so the ledger row and the decision commit together.
+            persist=False,
+        )
+    except superdocs_ops.SuperDocsCallFailed as failure:
+        _record_failed_approval(close_id, review_id, user, failure)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error": "SUPERDOCS_APPROVAL_FAILED",
+                "message": (
+                    f"SuperDocs rejected the approval of {review['section']!r}: {failure}. "
+                    "The change is still pending."
+                ),
+            },
+        ) from failure
+
+    return _decide(
+        close_id,
+        review_id,
+        "APPROVED",
+        user,
+        None,
+        approval=superdocs_ops.redact(envelope),
+        ledger_entry=entry,
+    )
+
+
+def _record_failed_approval(
+    close_id: str, review_id: str, user: Principal, failure: "superdocs_ops.SuperDocsCallFailed"
+) -> None:
+    """Leave the change PENDING, but make the attempt and its reason visible."""
+
+    def mutator(current: dict[str, Any]) -> None:
+        review = find_review(current, review_id)
+        review["error"] = str(failure)
+        review["superdocs_approval"] = None
+        superdocs_ops.record(current, failure.entry)
+        audit(current, "REVIEW_APPROVAL_FAILED", user, f"{review['section']}: {failure}")
+
+    try:
+        apply_to_close(close_id, mutator)
+    except HTTPException:
+        # The close or review vanished mid-flight; the 502 below is still the right answer.
+        pass
 
 
 @router.post("/closes/{close_id}/reviews/{review_id}/reject")
@@ -399,6 +569,11 @@ def reject_review(
     payload: RejectRequest | None = None,
     user: Principal = Depends(get_current_user),
 ) -> dict[str, Any]:
+    """Rejection is a local decision.
+
+    `approve_changes` is the only SuperDocs mutation in the contract; a rejected change
+    is simply never sent, so it cannot reach the exported document.
+    """
     return _decide(close_id, review_id, "REJECTED", user, payload.reason if payload else None)
 
 
@@ -428,6 +603,7 @@ def approve_signoff(
             )
         signoff.update({"status": "APPROVED", "person": user.name, "signed_by": user.id, "signed_at": None})
         signoff["signed_at"] = audit(current, "SIGNOFF_APPROVED", user, signoff["role"])["created_at"]
+        invalidate_export(current, user)
 
     return find_signoff(apply_to_close(close_id, mutator), signoff_id)
 
@@ -443,23 +619,109 @@ def export_status(close_id: str, user: Principal = Depends(get_current_user)) ->
     return {
         "exported": bool(close.get("exported")),
         "export": close.get("export"),
+        # Kept separate from the zip: one is what SuperDocs produced, the other is what
+        # the app assembled around it.
+        "superdocs_export": close.get("superdocs_export"),
         "planned_files": export_service.planned_files(close),
     }
 
 
 @router.post("/closes/{close_id}/export")
-def create_export(close_id: str, user: Principal = Depends(get_current_user)) -> dict[str, Any]:
+async def create_export(close_id: str, user: Principal = Depends(get_current_user)) -> dict[str, Any]:
+    """Ask SuperDocs to export the finished document, then package the close pack.
+
+    Two distinct artifacts come out of this, and the response keeps them apart:
+
+      * `superdocs_export` - the finished file SuperDocs produced from the approved
+        changes. This is the last step of the SuperDocs contract.
+      * the app-level zip - the evidence package a controller has to retain: the
+        SuperDocs export plus the source documents, the sign-off sheet, the audit
+        trail, the Supporting Memo and the SuperDocs operation ledger. SuperDocs
+        exports a document; a close pack is a file of record, so the app builds it.
+    """
     close = load_close(close_id)
     ensure_mutable(close)
-    result = export_service.build_pack(close, calculate_readiness(close))
+
+    working_document_id = close.get("superdocs_working_document_id")
+    if not working_document_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "NOT_GENERATED",
+                "message": "Generate the close pack before exporting it.",
+            },
+        )
+
+    approved_change_ids = [
+        review.get("external_change_id") or review["id"]
+        for review in close["reviews"]
+        if review["status"] == "APPROVED"
+    ]
+
+    client = get_client()
+    try:
+        envelope, entry = await superdocs_ops.call(
+            close_id,
+            EXPORT,
+            lambda: client.export_document(working_document_id, approved_change_ids),
+            document_id=working_document_id,
+            change_ids=approved_change_ids,
+            detail=f"{len(approved_change_ids)} approved changes",
+            persist=False,
+        )
+    except superdocs_ops.SuperDocsCallFailed as failure:
+        _record_failed_export(close_id, user, failure)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error": "SUPERDOCS_EXPORT_FAILED",
+                "message": f"SuperDocs could not export the close document: {failure}. Nothing was exported.",
+            },
+        ) from failure
+
+    superdocs_export = await run_in_threadpool(
+        export_service.store_superdocs_export, close, envelope
+    )
+    close["superdocs_export"] = superdocs_export
+    close["superdocs_operations"] = [*(close.get("superdocs_operations") or []), entry]
+    result = await run_in_threadpool(export_service.build_pack, close, calculate_readiness(close))
 
     def mutator(current: dict[str, Any]) -> None:
         current["exported"] = True
         current["export"] = result
-        audit(current, "EXPORT_COMPLETED", user, f"{result['filename']} ({result['size']} bytes)")
+        current["superdocs_export"] = superdocs_export
+        superdocs_ops.record(current, entry)
+        # Rebuild the memo so the packaged copy matches the decisions just made.
+        memo = upsert_supporting_memo(current, calculate_readiness(current))
+        current["generated_artifacts"] = current.get("generated_artifacts") or []
+        audit(
+            current,
+            "SUPERDOCS_EXPORTED",
+            user,
+            f"{superdocs_export['filename']} ({superdocs_export.get('size') or 0} bytes)",
+        )
+        audit(
+            current,
+            "EXPORT_COMPLETED",
+            user,
+            f"{result['filename']} ({result['size']} bytes), memo {memo['sha256'][:12]}",
+        )
 
     apply_to_close(close_id, mutator)
-    return {"status": "EXPORTED", **result}
+    return {"status": "EXPORTED", **result, "superdocs_export": superdocs_export}
+
+
+def _record_failed_export(
+    close_id: str, user: Principal, failure: "superdocs_ops.SuperDocsCallFailed"
+) -> None:
+    def mutator(current: dict[str, Any]) -> None:
+        superdocs_ops.record(current, failure.entry)
+        audit(current, "SUPERDOCS_EXPORT_FAILED", user, str(failure))
+
+    try:
+        apply_to_close(close_id, mutator)
+    except HTTPException:
+        pass
 
 
 @router.get("/closes/{close_id}/export/download")

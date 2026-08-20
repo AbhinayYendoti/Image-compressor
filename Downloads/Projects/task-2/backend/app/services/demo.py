@@ -121,8 +121,42 @@ def build_demo_close() -> dict[str, Any]:
     return close
 
 
+# Fields added after the first databases were written. A close stored before they
+# existed must not render as half-populated, so they are backfilled on boot.
+_BACKFILLED_FIELDS: dict[str, Any] = {
+    "generating_since": None,
+    "superdocs_working_document_id": None,
+    "superdocs_export": None,
+    "superdocs_operations": [],
+    "generated_artifacts": [],
+}
+
+
+def backfill_closes() -> None:
+    """Add any missing fields to closes written by an earlier build."""
+    for close in store.list_closes():
+        missing = {key: value for key, value in _BACKFILLED_FIELDS.items() if key not in close}
+        if not missing:
+            continue
+
+        def mutator(current: dict[str, Any], missing: dict[str, Any] = missing) -> None:
+            for key, value in missing.items():
+                current.setdefault(key, value)
+            # An export recorded before SuperDocs was part of the flow predates the
+            # contract, so it cannot satisfy the gate any more.
+            if current.get("exported") and not current.get("superdocs_export"):
+                current["exported"] = False
+                current["export"] = None
+
+        try:
+            store.mutate_close(close["id"], mutator)
+        except KeyError:
+            continue
+
+
 def ensure_demo_close() -> None:
     """Create the demo close once. Never overwrites an existing one."""
+    backfill_closes()
     if store.close_exists(DEMO_CLOSE_ID):
         return
     store.save_close(build_demo_close())

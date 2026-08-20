@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./var/close_pack.db"
     storage_dir: str = "./var/storage"
 
+    # How long a `generating` flag is believed before it is treated as abandoned by a
+    # crashed worker. Must exceed a real run: uploads are 60s each and the edit call is
+    # 180s, so a full pack cannot legitimately take this long.
+    generation_timeout_seconds: int = 900
+
     # SuperDocs. "mock" runs the deterministic in-process client, "live" calls the REST API.
     superdocs_mode: str = "mock"
     superdocs_api_key: str = ""

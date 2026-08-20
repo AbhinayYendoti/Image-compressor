@@ -75,10 +75,16 @@ const EVENT_LABELS: Record<string, string> = {
   GENERATION_STARTED: "Pack generation started",
   GENERATION_COMPLETED: "Pack generated",
   GENERATION_FAILED: "Pack generation failed",
+  GENERATION_ABANDONED: "Pack generation abandoned",
+  ARTIFACT_GENERATED: "Artifact generated",
   REVIEW_APPROVED: "Change approved",
   REVIEW_REJECTED: "Change rejected",
+  REVIEW_APPROVAL_FAILED: "SuperDocs approval failed",
+  SUPERDOCS_EXPORTED: "SuperDocs document exported",
+  SUPERDOCS_EXPORT_FAILED: "SuperDocs export failed",
   SIGNOFF_APPROVED: "Sign-off approved",
   EXPORT_COMPLETED: "Pack exported",
+  EXPORT_INVALIDATED: "Exported pack superseded",
   CLOSE_BLOCKED: "Close blocked",
   CLOSE_CLOSED: "Period closed"
 };

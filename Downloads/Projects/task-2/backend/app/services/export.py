@@ -5,13 +5,15 @@ bytes behind them. It now assembles a real zip containing generated PDF sheets a
 actual uploaded source documents, which the browser downloads.
 """
 
+import base64
 import io
 import json
 import zipfile
 from typing import Any
 
-from . import storage
+from . import storage, superdocs_ops
 from .clock import now_iso
+from .memo import SUPPORTING_MEMO_NAME, build_supporting_memo_bytes
 from .pdf import build_pdf
 
 SHEETS = [
@@ -23,11 +25,71 @@ SHEETS = [
     "05-audit-trail.pdf",
 ]
 
+# The SuperDocs half of the pack, kept in its own directory so a reviewer can tell at a
+# glance which bytes came from SuperDocs and which the app assembled.
+SUPERDOCS_DIR = "superdocs"
+SUPERDOCS_METADATA = f"{SUPERDOCS_DIR}/export-metadata.json"
+SUPERDOCS_LEDGER = f"{SUPERDOCS_DIR}/operation-ledger.json"
+
+
+def superdocs_export_entry(close: dict[str, Any]) -> str | None:
+    export = close.get("superdocs_export") or {}
+    filename = export.get("filename")
+    return f"{SUPERDOCS_DIR}/{filename}" if filename and export.get("storage_key") else None
+
 
 def planned_files(close: dict[str, Any]) -> list[str]:
     """What the pack will contain. Used by the UI before an export exists."""
     documents = [f"documents/{doc['filename']}" for doc in close["documents"] if doc["status"] == "READY"]
-    return SHEETS + sorted(documents)
+    superdocs = [SUPERDOCS_METADATA, SUPERDOCS_LEDGER]
+    exported = superdocs_export_entry(close)
+    if exported:
+        superdocs.append(exported)
+    return SHEETS + [SUPPORTING_MEMO_NAME] + sorted(superdocs) + sorted(documents)
+
+
+def store_superdocs_export(close: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+    """Persist what SuperDocs returned from `export_document`.
+
+    A live response may hand back inline bytes, a URL, or neither. Inline bytes are
+    stored and shipped; a URL is recorded as a reference. Nothing is invented to make
+    the response look richer than it was.
+    """
+    document_id = envelope.get("document_id") or close.get("superdocs_working_document_id") or "document"
+    filename = envelope.get("filename") or f"{document_id}-final.pdf"
+    record: dict[str, Any] = {
+        "kind": "SUPERDOCS_EXPORT",
+        "mode": envelope.get("mode") or superdocs_ops.current_mode(),
+        "document_id": document_id,
+        "export_id": envelope.get("export_id"),
+        "format": envelope.get("format"),
+        "filename": filename,
+        "approved_change_ids": envelope.get("approved_change_ids") or [],
+        "download_url": envelope.get("download_url") or envelope.get("url"),
+        "storage_key": None,
+        "size": None,
+        "sha256": envelope.get("sha256"),
+        "retrieved_at": now_iso(),
+        "envelope": superdocs_ops.redact(envelope),
+    }
+
+    encoded = envelope.get("content_base64")
+    if encoded:
+        try:
+            content = base64.b64decode(encoded)
+        except (ValueError, TypeError):
+            record["note"] = "SuperDocs returned content_base64 that could not be decoded."
+            return record
+        key = f"exports/{close['id']}/superdocs/{filename}"
+        stored = storage.put_bytes(key, content)
+        record.update({"storage_key": key, "size": stored["size"], "sha256": stored["sha256"]})
+        return record
+
+    record["note"] = (
+        "SuperDocs returned no inline content. The reference above is recorded, but the "
+        "bytes are not fetched, so the zip ships metadata only for this file."
+    )
+    return record
 
 
 def _summary_pdf(close: dict[str, Any], readiness: dict[str, Any]) -> bytes:
@@ -95,6 +157,18 @@ def _audit_pdf(close: dict[str, Any]) -> bytes:
     return build_pdf(f"Audit Trail - {close['period']}", lines or ["No audit events recorded."])
 
 
+def _superdocs_manifest(close: dict[str, Any]) -> dict[str, Any]:
+    export = close.get("superdocs_export") or None
+    return {
+        "mode": superdocs_ops.current_mode(),
+        "working_document_id": close.get("superdocs_working_document_id"),
+        "source_document_ids": close.get("superdocs_document_ids") or [],
+        "contract_coverage": superdocs_ops.contract_coverage(close),
+        "export": export,
+        "operation_count": len(close.get("superdocs_operations") or []),
+    }
+
+
 def build_pack(close: dict[str, Any], readiness: dict[str, Any]) -> dict[str, Any]:
     manifest = {
         "close_id": close["id"],
@@ -102,6 +176,17 @@ def build_pack(close: dict[str, Any], readiness: dict[str, Any]) -> dict[str, An
         "period": close["period"],
         "generated_at": now_iso(),
         "readiness": readiness,
+        "superdocs": _superdocs_manifest(close),
+        "generated_artifacts": [
+            {
+                "name": artifact["name"],
+                "kind": artifact["kind"],
+                "sha256": artifact.get("sha256"),
+                "size": artifact.get("size"),
+                "generated_at": artifact.get("generated_at"),
+            }
+            for artifact in close.get("generated_artifacts") or []
+        ],
         "documents": [
             {
                 "filename": doc["filename"],
@@ -127,6 +212,43 @@ def build_pack(close: dict[str, Any], readiness: dict[str, Any]) -> dict[str, An
         archive.writestr("05-audit-trail.pdf", _audit_pdf(close))
         written.extend(SHEETS)
 
+        # The Supporting Memo is rebuilt here rather than read back from storage so the
+        # packaged copy always reflects the decisions this pack is being filed against.
+        archive.writestr(SUPPORTING_MEMO_NAME, build_supporting_memo_bytes(close, readiness))
+        written.append(SUPPORTING_MEMO_NAME)
+
+        superdocs_export = close.get("superdocs_export") or {}
+        archive.writestr(
+            SUPERDOCS_METADATA,
+            json.dumps(superdocs_export or {"note": "No SuperDocs export recorded."}, indent=2),
+        )
+        archive.writestr(
+            SUPERDOCS_LEDGER,
+            json.dumps(
+                {
+                    "close_id": close["id"],
+                    "coverage": superdocs_ops.contract_coverage(close),
+                    "operations": close.get("superdocs_operations") or [],
+                },
+                indent=2,
+            ),
+        )
+        written.extend([SUPERDOCS_METADATA, SUPERDOCS_LEDGER])
+
+        entry = superdocs_export_entry(close)
+        if entry:
+            try:
+                archive.writestr(entry, storage.get_bytes(superdocs_export["storage_key"]))
+                written.append(entry)
+            except FileNotFoundError:
+                placeholder = f"{SUPERDOCS_DIR}/MISSING-{superdocs_export['filename']}.txt"
+                archive.writestr(
+                    placeholder,
+                    f"The SuperDocs export was recorded at {superdocs_export['storage_key']} "
+                    "but the bytes were not found when the pack was assembled.",
+                )
+                written.append(placeholder)
+
         for document in close["documents"]:
             if document["status"] != "READY":
                 continue
@@ -151,6 +273,7 @@ def build_pack(close: dict[str, Any], readiness: dict[str, Any]) -> dict[str, An
     stored = storage.put_bytes(key, buffer.getvalue())
 
     return {
+        "kind": "APP_ZIP",
         "storage_key": key,
         "filename": filename,
         "size": stored["size"],

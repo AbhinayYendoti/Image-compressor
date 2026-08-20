@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   Sparkles,
   Upload,
+  Workflow,
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -28,13 +29,15 @@ import type {
   CloseDetail,
   DocumentItem,
   ExportStatus,
+  GeneratedArtifact,
   GenerationJob,
   ReviewItem,
   Session,
-  SignoffItem
+  SignoffItem,
+  SuperDocsLedger
 } from "./lib/types";
 
-type Tab = "overview" | "documents" | "checklist" | "review" | "signoffs" | "pack";
+type Tab = "overview" | "documents" | "checklist" | "review" | "signoffs" | "pack" | "superdocs";
 
 const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard }> = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -42,15 +45,25 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard }> = [
   { id: "checklist", label: "Checklist", icon: CheckCircle2 },
   { id: "review", label: "Review", icon: ShieldCheck },
   { id: "signoffs", label: "Sign-offs", icon: FileCheck2 },
-  { id: "pack", label: "Final Pack", icon: PackageCheck }
+  { id: "pack", label: "Final Pack", icon: PackageCheck },
+  { id: "superdocs", label: "SuperDocs", icon: Workflow }
 ];
 
 const navLinks: Array<{ label: string; tab: Tab }> = [
   { label: "Closes", tab: "overview" },
   { label: "Templates", tab: "checklist" },
   { label: "Audit", tab: "overview" },
+  { label: "SuperDocs", tab: "superdocs" },
   { label: "Exports", tab: "pack" }
 ];
+
+/** The contract, in the order the close pack drives it. */
+const CONTRACT_LABELS: Record<string, string> = {
+  upload_document: "Upload source documents",
+  send_edit_instruction: "Send edit instruction",
+  approve_changes: "Approve proposed changes",
+  export_document: "Export finished document"
+};
 
 function asApiError(error: unknown): ApiError {
   return error instanceof ApiError ? error : new ApiError(0, (error as Error)?.message ?? "Unexpected error");
@@ -67,6 +80,8 @@ export function App() {
   const [close, setClose] = useState<CloseDetail | null>(null);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
+  const [ledger, setLedger] = useState<SuperDocsLedger | null>(null);
+  const [artifacts, setArtifacts] = useState<GeneratedArtifact[]>([]);
   const [job, setJob] = useState<GenerationJob | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [error, setError] = useState("");
@@ -106,15 +121,19 @@ export function App() {
           closeId = (closes.find((item) => item.id.startsWith("close-demo")) ?? closes[0]).id;
         }
 
-        const [detail, trail, exported] = await Promise.all([
+        const [detail, trail, exported, superdocs, generated] = await Promise.all([
           api.getClose(token, closeId),
           api.getAudit(token, closeId),
-          api.getExportStatus(token, closeId)
+          api.getExportStatus(token, closeId),
+          api.getSuperDocs(token, closeId),
+          api.getArtifacts(token, closeId)
         ]);
 
         setClose(detail);
         setAuditEvents(trail);
         setExportStatus(exported);
+        setLedger(superdocs);
+        setArtifacts(generated);
         setError("");
       } catch (failure) {
         handleFailure(failure);
@@ -240,6 +259,19 @@ export function App() {
       setBusy(false);
     }
   }, [close, busy, token, loadWorkspace, handleFailure]);
+
+  const downloadArtifact = useCallback(
+    async (artifact: GeneratedArtifact) => {
+      if (!close) return;
+      try {
+        const { blob, filename } = await api.downloadArtifact(token, close.id, artifact.id, artifact.name);
+        saveBlob(blob, filename);
+      } catch (failure) {
+        handleFailure(failure);
+      }
+    },
+    [close, token, handleFailure]
+  );
 
   const navigate = useCallback((tab: Tab) => {
     setActiveTab(tab);
@@ -386,10 +418,12 @@ export function App() {
             {activeTab === "review" && (
               <Review
                 reviews={close.reviews}
+                artifacts={artifacts}
                 query={query}
                 busy={busy}
                 closed={closed}
                 generated={readiness.generated}
+                onDownloadArtifact={downloadArtifact}
                 onDecision={(id, decision) =>
                   run((closeId) =>
                     decision === "approved"
@@ -417,6 +451,13 @@ export function App() {
                 busy={busy}
                 onExport={exportPack}
                 onClose={closePeriod}
+              />
+            )}
+            {activeTab === "superdocs" && (
+              <SuperDocsPanel
+                ledger={ledger}
+                artifacts={artifacts}
+                onDownloadArtifact={downloadArtifact}
               />
             )}
           </section>
@@ -759,20 +800,53 @@ function Checklist({
   );
 }
 
+function ArtifactList({
+  artifacts,
+  onDownload
+}: {
+  artifacts: GeneratedArtifact[];
+  onDownload: (artifact: GeneratedArtifact) => void;
+}) {
+  if (artifacts.length === 0) return null;
+
+  return (
+    <div className="pack-list">
+      {artifacts.map((artifact) => (
+        <div className="data-row" key={artifact.id}>
+          <FileText size={20} />
+          <div>
+            <strong>{artifact.name}</strong>
+            <span>
+              {artifact.description} • {formatBytes(artifact.size)} • {formatTimestamp(artifact.generated_at)}
+            </span>
+          </div>
+          <button className="secondary-button" onClick={() => onDownload(artifact)}>
+            <Download size={16} /> Open
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Review({
   reviews,
+  artifacts,
   query,
   busy,
   closed,
   generated,
-  onDecision
+  onDecision,
+  onDownloadArtifact
 }: {
   reviews: ReviewItem[];
+  artifacts: GeneratedArtifact[];
   query: string;
   busy: boolean;
   closed: boolean;
   generated: boolean;
   onDecision: (id: string, status: "approved" | "rejected") => void;
+  onDownloadArtifact: (artifact: GeneratedArtifact) => void;
 }) {
   const visible = reviews.filter((item) => matches(query, item.section, item.source_reference));
   const pending = reviews.filter((item) => item.status === "PENDING").length;
@@ -791,6 +865,14 @@ function Review({
           </h2>
         </div>
       </div>
+      {artifacts.length > 0 && (
+        <>
+          <p className="eyebrow">
+            <span /> Generated artifacts
+          </p>
+          <ArtifactList artifacts={artifacts} onDownload={onDownloadArtifact} />
+        </>
+      )}
       <div className="review-stack">
         {visible.map((item) => (
           <article className="review-item" key={item.id}>
@@ -816,6 +898,16 @@ function Review({
                 <p>{item.after_value}</p>
               </div>
             </div>
+            {item.superdocs_approval && (
+              <p className="superdocs-receipt">
+                SuperDocs approve_changes · {item.superdocs_approval.mode ?? "unknown"} mode · change{" "}
+                {item.superdocs_approval.approved_change_ids.join(", ") || "n/a"}
+                {item.superdocs_approval.request_id ? ` · ${item.superdocs_approval.request_id}` : ""}
+              </p>
+            )}
+            {item.error && (
+              <div className="failure-band">SuperDocs approval failed: {item.error} This change is still pending.</div>
+            )}
             {item.status === "PENDING" && !closed && (
               <div className="decision-row">
                 <button className="secondary-button" disabled={busy} onClick={() => onDecision(item.id, "rejected")}>
@@ -931,15 +1023,38 @@ function FinalPack({
           </div>
         ))}
       </div>
+      {exportStatus?.superdocs_export && (
+        <div className="timeline">
+          <p className="eyebrow">
+            <span /> SuperDocs exported document
+          </p>
+          <div className="timeline-row">
+            <PackageCheck size={16} />
+            {exportStatus.superdocs_export.filename}
+            {exportStatus.superdocs_export.size ? ` • ${formatBytes(exportStatus.superdocs_export.size)}` : ""} •{" "}
+            {exportStatus.superdocs_export.mode} mode
+          </div>
+          <div className="timeline-row">
+            Produced by <code>export_document</code> from {exportStatus.superdocs_export.approved_change_ids.length}{" "}
+            approved change
+            {exportStatus.superdocs_export.approved_change_ids.length === 1 ? "" : "s"}. It ships inside the zip
+            under <code>superdocs/</code>.
+          </div>
+        </div>
+      )}
       {exportStatus?.export && (
         <div className="timeline">
           <p className="eyebrow">
-            <span /> Exported pack
+            <span /> App close-pack archive
           </p>
           <div className="timeline-row">
             <History size={16} />
             {exportStatus.export.filename} • {formatBytes(exportStatus.export.size)} •{" "}
             {formatTimestamp(exportStatus.export.generated_at)}
+          </div>
+          <div className="timeline-row">
+            The retained file of record: the SuperDocs export plus source evidence, Supporting Memo, sign-off
+            sheet, audit trail and the SuperDocs operation ledger.
           </div>
         </div>
       )}
@@ -947,6 +1062,130 @@ function FinalPack({
       <button className="close-period-button" onClick={onClose} disabled={busy || closed}>
         {closed ? "Closed" : "Close Period"}
       </button>
+    </div>
+  );
+}
+
+function SuperDocsPanel({
+  ledger,
+  artifacts,
+  onDownloadArtifact
+}: {
+  ledger: SuperDocsLedger | null;
+  artifacts: GeneratedArtifact[];
+  onDownloadArtifact: (artifact: GeneratedArtifact) => void;
+}) {
+  if (!ledger) {
+    return (
+      <div className="panel-flow">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">
+              <span /> SuperDocs
+            </p>
+            <h2>Loading the operation ledger…</h2>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const { coverage, operations } = ledger;
+  const superdocsExport = ledger.export;
+
+  return (
+    <div className="panel-flow">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">
+            <span /> SuperDocs contract
+          </p>
+          <h2>{coverage.complete ? "All four operations exercised" : "Contract partially exercised"}</h2>
+          <p className="hero-copy">
+            Running in <strong>{ledger.mode}</strong> mode. Every adapter call this close has made is listed
+            below, successes and failures alike. Mock mode issues the same calls through the same interface as
+            live mode; only the transport differs.
+          </p>
+        </div>
+      </div>
+
+      <div className="pack-list">
+        {coverage.operations.map((operation) => (
+          <div className="data-row" key={operation.operation}>
+            {operation.exercised ? <CheckCircle2 size={20} /> : <CircleDashed size={20} />}
+            <div>
+              <strong>{CONTRACT_LABELS[operation.operation] ?? operation.operation}</strong>
+              <span>
+                <code>{operation.operation}</code> • {operation.count} call
+                {operation.count === 1 ? "" : "s"}
+                {operation.failures > 0 ? ` • ${operation.failures} failed` : ""}
+              </span>
+            </div>
+            <span className={operation.exercised ? "status ready" : "status pending"}>
+              {operation.exercised ? "Exercised" : "Not yet"}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {artifacts.length > 0 && (
+        <>
+          <p className="eyebrow">
+            <span /> Generated artifacts
+          </p>
+          <ArtifactList artifacts={artifacts} onDownload={onDownloadArtifact} />
+        </>
+      )}
+
+      {superdocsExport && (
+        <div className="timeline">
+          <p className="eyebrow">
+            <span /> SuperDocs exported document
+          </p>
+          <div className="timeline-row">
+            <PackageCheck size={16} />
+            {superdocsExport.filename}
+            {superdocsExport.size ? ` • ${formatBytes(superdocsExport.size)}` : ""} •{" "}
+            {superdocsExport.mode} mode • {superdocsExport.export_id ?? "no export id"}
+          </div>
+          {superdocsExport.note && <div className="timeline-row">{superdocsExport.note}</div>}
+        </div>
+      )}
+
+      <p className="eyebrow">
+        <span /> Operation ledger
+      </p>
+      <div className="pack-list superdocs-ledger">
+        {operations.length === 0 && (
+          <div className="data-row">
+            <CircleDashed size={20} />
+            <div>
+              <strong>No SuperDocs calls yet</strong>
+              <span>Generate the close pack to start the contract.</span>
+            </div>
+          </div>
+        )}
+        {operations.map((operation) => (
+          <div className="data-row" key={operation.id}>
+            {operation.status === "SUCCEEDED" ? <Check size={20} /> : <X size={20} />}
+            <div>
+              <strong>
+                <code>{operation.operation}</code>
+                {operation.detail ? ` — ${operation.detail}` : ""}
+              </strong>
+              <span>
+                {formatTimestamp(operation.started_at)} • {operation.mode} • {operation.duration_ms}ms
+                {operation.document_id ? ` • ${operation.document_id}` : ""}
+                {operation.request_id ? ` • ${operation.request_id}` : ""}
+                {operation.error ? ` • ${operation.error}` : ""}
+              </span>
+            </div>
+            <span className={operation.status === "SUCCEEDED" ? "status ready" : "status pending"}>
+              {statusLabel(operation.status)}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

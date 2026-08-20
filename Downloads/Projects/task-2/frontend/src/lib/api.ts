@@ -4,10 +4,12 @@ import type {
   CloseDetail,
   DocumentItem,
   ExportStatus,
+  GeneratedArtifact,
   GenerationJob,
   ReviewItem,
   Session,
-  SignoffItem
+  SignoffItem,
+  SuperDocsLedger
 } from "./types";
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/+$/, "");
@@ -101,6 +103,23 @@ export const api = {
     json<ApiReadiness>(`/api/v1/closes/${closeId}/readiness`, { token }),
 
   getAudit: (token: string, closeId: string) => json<AuditEvent[]>(`/api/v1/closes/${closeId}/audit`, { token }),
+
+  /** The SuperDocs operation ledger: proof the contract is exercised, not just described. */
+  getSuperDocs: (token: string, closeId: string) =>
+    json<SuperDocsLedger>(`/api/v1/closes/${closeId}/superdocs`, { token }),
+
+  getArtifacts: (token: string, closeId: string) =>
+    json<GeneratedArtifact[]>(`/api/v1/closes/${closeId}/artifacts`, { token }),
+
+  downloadArtifact: async (
+    token: string,
+    closeId: string,
+    artifactId: string,
+    filename: string
+  ): Promise<{ blob: Blob; filename: string }> => {
+    const response = await request(`/api/v1/closes/${closeId}/artifacts/${artifactId}/content`, { token });
+    return { blob: await response.blob(), filename };
+  },
 
   uploadDocument: (token: string, closeId: string, file: File) => {
     const form = new FormData();

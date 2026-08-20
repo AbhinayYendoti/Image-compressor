@@ -13,10 +13,12 @@ import logging
 from typing import Any
 
 from ..db import store
-from ..integrations.superdocs.client import SuperDocsResponseError, get_client
-from . import storage
+from ..integrations.superdocs.client import EDIT, UPLOAD, SuperDocsResponseError, get_client
+from . import storage, superdocs_ops
 from .clock import now_iso
-from .closes import audit, new_id
+from .closes import audit, clear_generation, invalidate_export, new_id
+from .memo import upsert_supporting_memo
+from .readiness import calculate_readiness
 
 logger = logging.getLogger(__name__)
 
@@ -85,20 +87,35 @@ async def run_generation(job_id: str, close_id: str, actor: dict[str, Any]) -> N
         client = get_client()
         uploaded_ids: list[str] = []
         for filename, content in payloads:
-            result = await client.upload_document(filename, content)
+            result, _ = await superdocs_ops.call(
+                close_id,
+                UPLOAD,
+                lambda filename=filename, content=content: client.upload_document(filename, content),
+                detail=filename,
+            )
             document_id = result.get("document_id")
             if not document_id:
                 raise SuperDocsResponseError(f"SuperDocs upload of {filename!r} returned no document_id")
             uploaded_ids.append(document_id)
 
         await _set_stage(job, 3)
-        changes = await client.edit_document(uploaded_ids[0], INSTRUCTION)
+        working_document_id = uploaded_ids[0]
+        changes, _ = await superdocs_ops.call(
+            close_id,
+            EDIT,
+            lambda: client.edit_document(working_document_id, INSTRUCTION),
+            document_id=working_document_id,
+            detail=f"{len(uploaded_ids)} source documents",
+        )
 
         await _set_stage(job, 4)
 
         def apply(close: dict[str, Any]) -> None:
-            close["generating"] = False
+            clear_generation(close)
             close["superdocs_document_ids"] = uploaded_ids
+            close["superdocs_working_document_id"] = working_document_id
+            # A new edit round invalidates the previous SuperDocs export too.
+            close["superdocs_export"] = None
             # Regenerating replaces only undecided items; decisions already made stand.
             decided = [item for item in close["reviews"] if item["status"] != "PENDING"]
             decided_keys = {item.get("external_change_id") for item in decided}
@@ -119,12 +136,19 @@ async def run_generation(job_id: str, close_id: str, actor: dict[str, Any]) -> N
                 if change.get("external_change_id") not in decided_keys
             ]
             close["reviews"] = decided + fresh
+            # The memo is a generated artifact, not an export-time assembly step: it has
+            # to exist in the UI as soon as generation finishes.
+            memo = upsert_supporting_memo(close, calculate_readiness(close))
             audit(
                 close,
                 "GENERATION_COMPLETED",
                 actor,
                 f"{len(uploaded_ids)} source documents processed, {len(fresh)} changes proposed",
             )
+            audit(close, "ARTIFACT_GENERATED", actor, f"{memo['name']} ({memo['size']} bytes)")
+            # Regenerating rewrites the review queue, so any pack exported before now
+            # describes a close that no longer exists.
+            invalidate_export(close, actor)
 
         await asyncio.to_thread(store.mutate_close, close_id, apply)
 
@@ -138,7 +162,7 @@ async def run_generation(job_id: str, close_id: str, actor: dict[str, Any]) -> N
         await asyncio.to_thread(store.save_job, job)
 
         def mark_failed(close: dict[str, Any]) -> None:
-            close["generating"] = False
+            clear_generation(close)
             audit(close, "GENERATION_FAILED", actor, message)
 
         try:

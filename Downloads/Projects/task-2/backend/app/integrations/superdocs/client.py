@@ -6,12 +6,23 @@ entry point used by the generation service, selected by `SUPERDOCS_MODE`.
 """
 
 import asyncio
+import base64
+import hashlib
 import json
 from typing import Any, Protocol
 
 import httpx
 
 REQUIRED_CHANGE_FIELDS = ("section", "before_value", "after_value")
+
+# The four operations that make up the SuperDocs contract, in the order the close pack
+# workflow exercises them. `send_edit_instruction` is the ledger's name for the
+# `edit_document` adapter call; the rest match the adapter method names.
+UPLOAD = "upload_document"
+EDIT = "send_edit_instruction"
+APPROVE = "approve_changes"
+EXPORT = "export_document"
+CONTRACT_OPERATIONS = (UPLOAD, EDIT, APPROVE, EXPORT)
 
 
 class SuperDocsResponseError(RuntimeError):
@@ -25,7 +36,9 @@ class SuperDocsClientProtocol(Protocol):
 
     async def approve_changes(self, document_id: str, change_ids: list[str]) -> dict[str, Any]: ...
 
-    async def export_document(self, document_id: str) -> dict[str, Any]: ...
+    async def export_document(
+        self, document_id: str, approved_change_ids: list[str] | None = None
+    ) -> dict[str, Any]: ...
 
 
 class SuperDocsClient:
@@ -72,8 +85,17 @@ class SuperDocsClient:
             "POST", f"/documents/{document_id}/approve", timeout=60, json={"change_ids": change_ids}
         )
 
-    async def export_document(self, document_id: str) -> dict[str, Any]:
-        return await self._request("POST", f"/documents/{document_id}/export", timeout=180)
+    async def export_document(
+        self, document_id: str, approved_change_ids: list[str] | None = None
+    ) -> dict[str, Any]:
+        # The approved ids are already server-side from approve_changes; they are echoed
+        # so the request is self-describing and the exported file is unambiguous.
+        payload: dict[str, Any] = {}
+        if approved_change_ids is not None:
+            payload["approved_change_ids"] = approved_change_ids
+        return await self._request(
+            "POST", f"/documents/{document_id}/export", timeout=180, json=payload
+        )
 
 
 class MockSuperDocsClient:
@@ -110,7 +132,13 @@ class MockSuperDocsClient:
     async def upload_document(self, filename: str, content: bytes) -> dict[str, Any]:
         await asyncio.sleep(0.05)
         slug = filename.lower().replace(" ", "-")
-        return {"document_id": f"mock-{slug}", "status": "uploaded", "bytes": len(content)}
+        return {
+            "document_id": f"mock-{slug}",
+            "status": "uploaded",
+            "bytes": len(content),
+            "request_id": "mock-upload-" + _digest(slug, hashlib.sha256(content).hexdigest())[:16],
+            "mode": "mock",
+        }
 
     async def edit_document(self, document_id: str, instruction: str) -> list[dict[str, Any]]:
         await asyncio.sleep(0.05)
@@ -118,11 +146,63 @@ class MockSuperDocsClient:
 
     async def approve_changes(self, document_id: str, change_ids: list[str]) -> dict[str, Any]:
         await asyncio.sleep(0.05)
-        return {"document_id": document_id, "approved_change_ids": change_ids}
+        ordered = sorted(change_ids)
+        return {
+            "document_id": document_id,
+            "approved_change_ids": ordered,
+            "status": "approved",
+            # Derived from the inputs so the same approval always yields the same
+            # receipt; nothing here comes from a live service.
+            "request_id": "mock-approve-" + _digest(document_id, *ordered)[:16],
+            "mode": "mock",
+        }
 
-    async def export_document(self, document_id: str) -> dict[str, Any]:
+    async def export_document(
+        self, document_id: str, approved_change_ids: list[str] | None = None
+    ) -> dict[str, Any]:
         await asyncio.sleep(0.05)
-        return {"document_id": document_id, "export_key": f"exports/{document_id}/final-close-pack.pdf"}
+        from ...services.pdf import build_pdf
+
+        approved = sorted(approved_change_ids or [])
+        lines = [
+            "Produced by the SuperDocs MOCK adapter. This is not live SuperDocs output.",
+            "The bytes below are derived only from the inputs, so they are reproducible.",
+            "",
+            f"Working document id : {document_id}",
+            f"Approved changes    : {len(approved)}",
+        ]
+        lines.extend(f"  - {change_id}" for change_id in approved)
+        if not approved:
+            lines.append("  (no changes were approved)")
+        content = build_pdf("SuperDocs Export (mock)", lines)
+
+        return {
+            "document_id": document_id,
+            "export_id": "mock-export-" + _digest(document_id, *approved)[:16],
+            "status": "exported",
+            "format": "pdf",
+            "filename": f"{_stem(document_id)}-final.pdf",
+            "approved_change_ids": approved,
+            "content_base64": base64.b64encode(content).decode("ascii"),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "mode": "mock",
+        }
+
+
+def _digest(*parts: str) -> str:
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _stem(document_id: str) -> str:
+    """Drop a trailing file extension so exports are not named `x.pdf-final.pdf`."""
+    head, _, tail = document_id.rpartition(".")
+    return head if head and 1 <= len(tail) <= 5 and tail.isalnum() else document_id
+
+
+def current_mode() -> str:
+    from ...core.config import settings
+
+    return settings.superdocs_mode.strip().lower()
 
 
 def get_client() -> SuperDocsClientProtocol:
